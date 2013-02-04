@@ -11,10 +11,10 @@
                                                  replace-oldest-exemplar-corrective]]
         [incanter.core :only [abs dataset view]]
         [incanter.stats :only [mean median pdf-normal]];[euclidean-distance]]
-        [incanter.charts :only [xy-plot trace-plot]]))
+        [incanter.charts :only [xy-plot]]))
 
 (def wedel2004-update-fn
-  (partial language-game-update-skeleton
+  (partial naming-game-update-skeleton
            #(vector (rand-int 2)) ; context-fn - only approximately the same as in the paper, see below
            first ; topic-fn
            nil ; no invention in this game
@@ -85,4 +85,3 @@ means it is assigned probabilistically proportional to the distance to the categ
     (time (run 2000 (->Wedel2004-corrective-feedback initial-lexicon)))
     (time (run 2000 (->Wedel2004-category-competition initial-lexicon)))))
 
-(-main)
