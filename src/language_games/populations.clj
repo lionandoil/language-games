@@ -29,7 +29,7 @@
                       (update-in [j] #(update % :listener outcome))))
    :advance-population identity}); no timekeeping/population update
 
-(defn- make-agent-vector
+(defn make-agent-vector
   "Checks a given vector of agents for appropriate length or otherwise
    generates a vector of agents based on the agent-generation function"
   [n agent-vec-or-fn]
@@ -100,18 +100,38 @@
                                           identity reverse)
                                          (rand-nth (:edges this)))))))
 
+(defn connected?
+  "Returns true iff the given set of edges defines a graph of n connected vertices"
+  [n edges]
+  (let [start (first (first edges))]
+    (loop [visited #{}
+           [head & tail] [start]]
+      (if head
+        (if (contains? visited head)
+          (recur visited tail)
+          (recur
+            (conj visited head)
+            (concat tail (map second (filter #(= head (first %)) edges)) (map first (filter #(= head (second %)) edges)))))
+        (= (count visited) n)))))
+;(connected? 3 [[0 1] [1 2]])
+;(connected? 4 [[0 1] [1 2]])
+;(connected? 4 [[0 1] [2 3]])
+;(connected? 4 [[0 1] [1 2] [2 3]])
+
 (defn new-randomly-connected-population
   "Creates a new randomly connected population of n agents, each
    of which is connected to exactly k other agents"
   [n k agent-vec-or-fn]
-  {:pre [(>= k 0) (> n k)]}
+  {:pre [(>= k 2) (> n k)]}
   (let [agents (make-agent-vector n agent-vec-or-fn)
         init-pool (persistent! (reduce #(assoc! %1 %2 k) (transient {}) (range n)))]
     (loop [pool init-pool
            edges #{}]
       (case (count pool)
-        ; we're done!
-        0 (StructuredPopulation. 0 agents (vec edges))
+        ; we're done, just make sure the graph is connected, otherwise restart
+        0 (if (connected? n edges)
+            (StructuredPopulation. 0 agents (vec edges))
+            (recur init-pool #{}))
         ; we're at a dead end, restart
         1 (recur init-pool #{})
         ; we're not done, randomly select two available sockets
