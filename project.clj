@@ -4,4 +4,4 @@
   :dependencies [[org.clojure/clojure "1.4.0"]
                  [org.clojure/math.combinatorics "0.0.3"]
                  [org.clojure/math.numeric-tower "0.0.2"]
-                 [incanter "1.4.1"]])
+                 [incanter "1.5.0-SNAPSHOT"])
