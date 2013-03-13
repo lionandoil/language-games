@@ -2,11 +2,9 @@
      language-games.learning.usm
   "The utterance-based selection model (Baxter et al. 2006, 2009) and
    its extension (Blythe & Croft 2012)"
-  (:use [language-games.core :only [Agent update]]
-        [clojure.math.numeric-tower :only [round]]
-        [incanter.core :only [to-dataset col-names view]]
-        [incanter.charts :only [xy-plot add-lines]]
-        [incanter.stats :only [sample-binomial]]))
+  (:use [language-games.core :only [Agent agents update]]
+        [language-games.utils.collections :only [take-while-strictly-monotonic]]
+        [language-games.utils.math :only [sample-binomial]]))
 
 ; parameters:
 ; * G(i,j), the interaction probabilities, are actually a property of the population
@@ -16,62 +14,59 @@
 ; * f(n,T), the observed frequency -> perceived frequency function
 ; * lambda, the learning rate
 
+; the extended USM update function (Blythe & Croft 2012):
+; x' = [ x + lambda * ( (1-Hij)*f(ni) + Hij*f(nj) ) ] / (1 + lambda)
 (defn make-extended-usm-update-fn
-  "Creates"
+  "Returns an extended utterance selection model update function with the given
+   parameters, where 0 <= (H i j) <= 1"
   [H T f lambda]
   (fn [this role {:keys [i j name interp]}]
-    (case role
-      :speaker
+    (let [[self other h] (case role :speaker [name interp (H i j)] :listener [interp name (H j i)])]
       (/
         (+ this
            (* lambda
-              (+ (* (- 1 (H i j)) (f name T))
-                 (* (H i j) (f interp T)))))
-        (inc lambda))
-      :listener
-      (/
-        (+ this
-           (* lambda
-              (+ (* (- 1 (H j i)) (f interp T))
-                 (* (H j i) (f name T)))))
+              (+ (* (- 1 (H i j)) (f self T))
+                 (* (H i j) (f other T)))))
         (inc lambda)))))
 
-;((make-extended-usm-update-fn (constantly 0.1) 4 / 0.01) 1.0 :speaker {:i 0 :j 0 :name 3 :interp 3})
-
+; the original USM (Baxter et al. 2006, 2009) update function:
+; x' = [ x + lambda * (ni + Hij*nj) ] / (1 + lambda * (1+Hij) )
 (defn make-usm-update-fn
-  "Where f(u) = u"
+  "Returns an original utterance selection model update function with the given
+   parameters, where 0 <= (H i j) < infinity"
   [H T lambda]
-  (make-extended-usm-update-fn H T / lambda))
+  (fn [this role {:keys [i j name interp]}]
+    (let [[self other h] (case role :speaker [name interp (H i j)] :listener [interp name (H j i)])]
+      (/
+        (+ this
+           (* lambda
+              (+ (/ self T)
+                 (* h (/ other T)))))
+        (inc (* (inc h) lambda))))))
 
 (defn neutral-interactor-selection
-  "Returns an USM updating function for neutral evolution with the given learning parameters"
+  "Returns an original (when no f is given) or extended USM update function
+  (when f is specified) for neutral evolution"
   ([T lambda h]
-    (neutral-interactor-selection T / lambda h))
+    (make-usm-update-fn (constantly h) T lambda))
   ([T f lambda h]
-    (make-extended-usm-update-fn (constantly (* lambda h)) T f lambda)))
+    (make-extended-usm-update-fn (constantly h) T f lambda)))
 
 (defn weighted-interactor-selection
-  "Returns an USM updating function for leader-follower models with n leaders"
+  "Returns an extended USM update function for leader-follower models with n leaders"
   [T lambda h n alpha]
-  (make-extended-usm-update-fn #(* lambda h (if (and (> %1 n) (<= %2 n))
-                                              alpha 1.0))
-                               T / lambda))
+  (make-extended-usm-update-fn
+    #(if (and (> %1 n) (<= %2 n))
+         (* h alpha)
+         h)
+    T lambda))
 
 (defn replicator-selection
-  "Returns an USM updating function with the innovation asymetrically preferred
+  "Returns an extended USM update function with the innovation asymetrically preferred
    relative to parameter b"
-  [T b lambda h]
+  [T lambda h b]
   {:pre [(pos? b)]}
-  (make-extended-usm-update-fn (constantly (* lambda h)) T #(min [1 (* (inc b) %)]) lambda))
-
-
-(defn- sample-bin [n p]
-  "Samples a single binomial, works also for p = 0.0 and 1.0"
-  (case p
-    0.0 0
-    1.0 n
-    ; work around incanter's buggy (sample-binomial) with (first)
-    (first (sample-binomial nil :size n :prob p))))
+  (make-extended-usm-update-fn (constantly h) T #(min 1 (* (inc b) (/ %1 %2))) lambda))
 
 (defn make-doubles-usm-agents
   "Calls (extend) on java.lang.Double so that doubles will be treated as agents
@@ -79,16 +74,19 @@
   [T update-fn]
   (extend java.lang.Double
     Agent
-    {:produce (fn [this _ _] (sample-bin T this))
-     :interpret (fn [this _ _] (sample-bin T this))
+    {:produce (fn [this _ _] (sample-binomial T this))
+     :interpret (fn [this _ _] (sample-binomial T this))
      :update update-fn}))
 
-(defn make-bigdecimals-usm-agents
-  "Calls (extend) on java.math.BigDecimal so that arbitrary precision decimals will
-   be treated as agents with the given utterance-based selection model update function."
-  [T update-fn]
-  (extend java.math.BigDecimal
-    Agent
-    {:produce (fn [this _ _] (sample-bin T (double this)))
-     :interpret (fn [this _ _] (sample-bin T (double this)))
-     :update update-fn}))
+(defn strict-convergence
+  "Returns true iff all agents in the population have the same value of x"
+  [ppl]
+  (apply = (agents ppl)))
+
+(defn approximate-convergence
+  "Returns true iff all agents in the population are within 10E-6 of categorical use of one variant"
+  [ppl]
+  (every?
+    (if (> (first (agents ppl)) 0.5) #(> % (- 1 10E-6))
+                                     #(< % 10E-6))
+    (agents ppl)))
