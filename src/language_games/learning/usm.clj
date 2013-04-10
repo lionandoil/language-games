@@ -4,7 +4,7 @@
    its extension (Blythe & Croft 2012)"
   (:use [language-games.core :only [Agent agents update]]
         [language-games.utils.collections :only [take-while-strictly-monotonic]]
-        [language-games.utils.math :only [sample-binomial]]))
+        [language-games.utils.math :only [limit sample-binomial]]))
 
 ; parameters:
 ; * G(i,j), the interaction probabilities, are actually a property of the population
@@ -55,10 +55,10 @@
 (defn weighted-interactor-selection
   "Returns an extended USM update function for leader-follower models with n leaders"
   [T lambda h n alpha]
-  (make-extended-usm-update-fn
+  (make-usm-update-fn
     #(if (and (> %1 n) (<= %2 n))
-         (* h alpha)
-         h)
+         (* h alpha lambda)
+         (* h lambda))
     T lambda))
 
 (defn replicator-selection
@@ -67,6 +67,18 @@
   [T lambda h b]
   {:pre [(pos? b)]}
   (make-extended-usm-update-fn (constantly h) T #(min 1 (* (inc b) (/ %1 %2))) lambda))
+
+(defn replicator-selection-analytic
+  "Analytic approximation of the deterministic component of the replicator
+  selection dynamics (cf. (31) in the mathematical appendix)
+
+  For T=2 this is equivalent to the logistic function with r = 2b/lambda"
+  [[T x0 lambda b] t]
+  {:pre [(> T 1)]}
+  (let [Tm (dec T)]
+    (/ x0 (Math/pow (+ (Math/pow x0 Tm) (* (Math/pow (- 1 x0) Tm) (Math/exp (/ (* -2 Tm b t) lambda)))) (/ 1 Tm)))))
+;(incanter.core/view (incanter.charts/function-plot (partial replicator-selection-analytic [4 0.1 0.01 0.001]) 0.0 40.0))
+
 
 (defn make-doubles-usm-agents
   "Calls (extend) on java.lang.Double so that doubles will be treated as agents

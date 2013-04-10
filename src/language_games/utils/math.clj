@@ -4,6 +4,7 @@
   (:require
     [incanter.stats :only [sample-binomial]])
   (:use
+    [incanter.charts :only [add-function]]
     [incanter.optimize :only [non-linear-model]]))
 
 ; this can probably be made more efficient by basing the algorithm on random permutations
@@ -28,7 +29,8 @@
     0.0 0
     1.0 n
     ; work around incanter's buggy (sample-binomial) with (first)
-    (first (incanter.stats/sample-binomial nil :size n :prob p))))
+    ((if (= n 1) identity first)
+      (incanter.stats/sample-binomial nil :size n :prob p))))
 
 (defn limit
   "Limits x to lie within the range [mn,mx] (default [0,1]). Returns x
@@ -52,7 +54,7 @@
   (let [t0idx (first (keep-indexed #(when (>= %2 (/ K 2)) %1) ys))
         t0 (nth xs t0idx)
         ; find slope at the turning point to estimate growth rate r
-        ; this will throw an exception if the data is malformed, e.g. if t0idx <= 0
+        ; this will throw an exception if the data is malformed, i.e. if t0idx <= 0
         mt0 (/ (- (nth ys t0idx) (nth ys (dec t0idx)))
                (- t0             (nth xs (dec t0idx))))
         ; m'(t0) = K*r / 4
@@ -70,3 +72,19 @@
     (let [K (apply max ys)
           [r t0] (guess-r-t0 K xs ys)]
       (non-linear-model logistic ys xs [K r t0]))))
+
+(defn add-model
+  "Adds the function plot for the given model to the chart.
+
+  chart: a JFreeChart object
+  f:     a function that takes two arguments (the fitted coefficients
+         and an x value) and returns the corresponding y value
+  model: the model that was fitted to the data"
+  [chart f model & [min-range max-range]]
+  ;(add-lines chart (:x model) (:fitted model))))
+  (add-function
+    chart
+    (partial f (:coefs model))
+    (or min-range (apply min (:x model)))
+    (or max-range (apply max (:x model)))
+    :series-label (str f)))

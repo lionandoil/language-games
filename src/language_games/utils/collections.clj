@@ -60,7 +60,7 @@ different indices together with their indices in (i el_i j el_j ...) format"
   [pred coll]
   (map first (filter-indexed pred coll)))
 ;  (for [[idx elt] (indexed coll) :when (pred elt)] idx))
-
+;  (keep-indexed #(when (pred %2) %1) coll))
 
 (defn firsts
   "Returns a lazy seq of all consecutive elements at the beginning of the
@@ -100,3 +100,27 @@ solution and 2) calculating key only once for each element."
         -1 (recur (list fi) (key-fn fi) res)
         1 (recur maxs value res))
       maxs)))
+
+(defn take-while-relation
+  "Takes all elements from the beginning of the collection as long as the
+   relation (binary predicate) is true for the pairs of consecutive
+   elements. Always returns at least the first element."
+  [pred [fi & res]]
+  (lazy-seq
+    (cons fi (when (and (seq res) (pred fi (first res)))
+               (take-while-relation pred res)))))
+
+; examples of usage:
+(def take-while-descending (partial take-while-relation >=))
+(def take-while-strictly-descending (partial take-while-relation >))
+(def take-while-ascending (partial take-while-relation <=))
+(def take-while-strictly-ascending (partial take-while-relation <))
+
+(defn take-while-strictly-monotonic
+  "Takes all elements from the beginning of the collection as long as
+   their pairwise differences "
+  [[fi sec & _ :as coll]]
+  (case (compare fi sec)
+    -1 (take-while-strictly-ascending coll)
+     1 (take-while-strictly-descending coll)
+    (throw (IllegalArgumentException. "The first two elements of the collection are equal."))))
