@@ -5,14 +5,22 @@
         [language-games.utils.collections :only [rand-nths rand-nths-indexed]]))
 
 (def production-perception-loop-behaviour
-  "Default implementations for running games with a single agent in a production-perception loop,
-   associate by invoking (extend <YourAgentType> Population production-perception-loop-behaviour)."
-  {:size (fn [_] 1)
+  "Default implementations for running games with a single agent in a
+  production-perception loop. Associate by calling (make-production-perception-loop),
+  or (extend <YourAgentType> Population production-perception-loop-behaviour) for
+  extra customisation."
+  {:size (constantly 1)
    :agents list
    :draw-pair #(vector 0 % 0 %)
    :update-agents (fn [this outcome] (update this :listener outcome))
    :advance-population identity})
 
+(defn make-production-perception-loop
+  "Makes instances of the given type/record/class (which should implement the
+  Agent protocol) amenable to be passed to (run-game) as a population, resulting
+  in the agent being put into a production-perception loop."
+  [type]
+  (extend type Population production-perception-loop-behaviour))
 
 (def seqable-behaviour
   "Default implementations for running language games on seqable collection of agents which
