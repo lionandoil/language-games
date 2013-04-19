@@ -3,7 +3,7 @@
   "Bayesian Iteratead Learning and Fisher-Wright"
   (:use [language-games.plotting.basic :only [heat-map]]
         [language-games.utils.stats :only [pdf-beta-binomial sample-binomial]]
-        [incanter.core :only [$= matrix mmult trans view save]]
+        [incanter.core :only [$= matrix mmult mult trans view save]]
         [incanter.charts :only [add-lines xy-plot]]
         [incanter.stats :only [mean pdf-binomial]]))
 
@@ -58,20 +58,23 @@
   	(view hm)
   	hm))
 
-(defn bilm-iteration
-  "Carry out an iteration according to the stochastic process defined by iterated learning.
-  dist is the current probability of occupied states, N is taken to be (count dist)-1 "
-  [alpha dist]
+(defn run-markov-chain
+  "Computes the development of the Markov chain probability distribution for the
+  specified number of iterations. init is the initial probability distribution over
+  occupied states (an 1xN vector), the transition matrix an NxN matrix (rows should
+  sum to 1)."
+  [iterations transition-matrix init]
   ; transpose so that every row contains all the probabilities of going into a state
-  (mmult (trans (bilm-transition-matrix (dec (count dist)) alpha)) dist))
-;  (mmult (trans (wright-fisher-transition-matrix (dec (count dist)) (N-alpha-to-u (dec (count dist)) alpha))) dist))
+  (take iterations (iterate #(mmult (trans transition-matrix) %) init)))
 
-(bilm-heatmap (take 10 (iterate (partial bilm-iteration 0.2) [0 0 0 0 0 1.0 0 0 0 0 0])))
-(bilm-heatmap (take 10 (iterate (partial bilm-iteration 2.0) [0 0 0 0 0 1.0 0 0 0 0 0])))
-(bilm-heatmap (take 10 (iterate (partial bilm-iteration 10.0) [0 0 0 0 0 1.0 0 0 0 0 0])))
+(bilm-heatmap (run-markov-chain 10 (bilm-transition-matrix 10 0.2) [0 0 0 0 0 1.0 0 0 0 0 0]))
+(bilm-heatmap (run-markov-chain 10 (bilm-transition-matrix 10 2.0) [0 0 0 0 0 1.0 0 0 0 0 0]))
+(bilm-heatmap (run-markov-chain 10 (bilm-transition-matrix 10 10.0) [0 0 0 0 0 1.0 0 0 0 0 0]))
 
+; identical results when using the equivalent wright-fisher transition-matrix
+(= (run-markov-chain 10 (bilm-transition-matrix 10 10.0) [0 0 0 0 0 1.0 0 0 0 0 0])
+   (run-markov-chain 10 (wright-fisher-transition-matrix 10 (N-alpha-to-u 10 10.0)) [0 0 0 0 0 1.0 0 0 0 0 0]))
 
-; 
 
 (defn beta-stationary
   "Calculate the discretised version of the stationary distribution by
@@ -106,14 +109,14 @@
   (let [N (count (first data))]
   	(concat data [(repeat N 0.0) (bilm-stationary alpha (dec N))])))
 
-; have another look at the three markov chain developments in contrast to the stationary
-;(bilm-heatmap (append-stationary (take 10 (iterate (partial bilm-iteration 0.2) [0 0 0 0 0 1.0 0 0 0 0 0])) 0.2))
-;(bilm-heatmap (append-stationary (take 10 (iterate (partial bilm-iteration 2.0) [0 0 0 0 0 1.0 0 0 0 0 0])) 2.0))
-;(bilm-heatmap (append-stationary (take 10 (iterate (partial bilm-iteration 10.0) [0 0 0 0 0 1.0 0 0 0 0 0])) 10.0))
+; have another look at the three markov chain developments against the stationary distribution
+;(bilm-heatmap (append-stationary (run-markov-chain 10 (bilm-transition-matrix 10 0.2) [0 0 0 0 0 1.0 0 0 0 0 0]) 0.2))
+;(bilm-heatmap (append-stationary (run-markov-chain 10 (bilm-transition-matrix 10 2.0) [0 0 0 0 0 1.0 0 0 0 0 0]) 0.2))
+;(bilm-heatmap (append-stationary (run-markov-chain 10 (bilm-transition-matrix 10 10.0) [0 0 0 0 0 1.0 0 0 0 0 0]) 0.2))
 
 ; the posterior is completely uniform when alpha/(1+alpha/n) = 1,
 (bilm-stationary (/ 10 9) 10)
-(bilm-heatmap (append-stationary (take 10 (iterate (partial bilm-iteration (/ 10 9)) [0 0 0 0 0 1.0 0 0 0 0 0])) (/ 10 9)))
+(bilm-heatmap (append-stationary (run-markov-chain 25 (bilm-transition-matrix 10 (/ 10 9)) [0 0 0 0 0 1.0 0 0 0 0 0]) (/ 10 9)))
 
 
 
@@ -122,22 +125,50 @@
 (def homogeneous-population (list* 1.0 (repeat 50 0)))
 
 ; figure 2ai
-(bilm-heatmap (append-stationary (take 50 (iterate (partial bilm-iteration 0.05) homogeneous-population)) 0.05))
+(bilm-heatmap (append-stationary (run-markov-chain 50 (bilm-transition-matrix 50 0.05) homogeneous-population) 0.05))
 ;(view (xy-plot (range) (bilm-stationary 0.05 50)))
 
 ; figure 2bi
-(bilm-heatmap (append-stationary (take 50 (iterate (partial bilm-iteration 10) homogeneous-population)) 10))
+(bilm-heatmap (append-stationary (run-markov-chain 50 (bilm-transition-matrix 50 10.0) homogeneous-population) 0.05))
 ;(view (xy-plot (range) (bilm-stationary 10 50)))
+
+(defn conditioned-transition
+  ""
+  [N alpha chainlength]
+  (let [trans-matrix (bilm-transition-matrix N alpha)
+        startdist (list* 1.0 (repeat N 0))
+        enddist (reverse startdist)
+        forward-probs (take chainlength (iterate #(mmult (trans trans-matrix) %) startdist))
+        ; figure out what the proportion of chains is so we can normalize the heatmap to [0,1]
+        proportion (last (last forward-probs))
+        backward-probs (reverse (take chainlength (iterate #(mmult trans-matrix %) enddist)))]
+    (mult forward-probs backward-probs (/ 1 proportion))))
+(defn plot-conditioned-transition
+  [N alpha chainlength]
+  (let [conditioned-probs (conditioned-transition N alpha chainlength)
+        chart (bilm-heatmap conditioned-probs)
+        mean-trajectory (map #(apply + (map-indexed * %)) conditioned-probs)]
+    (add-lines chart (range) mean-trajectory)))
+
+; figure 2aii
+(plot-conditioned-transition 50 0.05 50)
+; figure 2bii
+(plot-conditioned-transition 50 10.0 50)
 
 
 ; the probability that a chain that was initialised at 0/50 is all the way at 50/50 in the 50th generation is ~0.0006
-(last (nth (iterate (partial bilm-iteration 0.05) homogeneous-population) 49))
+(last (last (run-markov-chain 50 (bilm-transition-matrix 50 0.05) homogeneous-population)))
 ; i.e. we'll get one of those every
-(/ 1.0 (last (nth (iterate (partial bilm-iteration 0.05) homogeneous-population) 49)))
+(/ 1.0 (last (last (run-markov-chain 50 (bilm-transition-matrix 50 0.05) homogeneous-population))))
 ; time we stochastically run a chain
 
 
 ; let's numerically find some chains that fulfill this, i.e. let's do some actual iterated learning!
+
+(defn homogeneous-population
+  "Return a distribution over populations of size n where all populations are in a homogeneous state"
+  [n]
+  (list* 1.0 (repeat n 0)))
 
 (defn population-update
   "Stochastic population update"
@@ -147,7 +178,7 @@
 (defn generate-fixation-chains
   "Generate chains until finding a fixed number that go from the original state (0/n) to fixation (n/n) in exact chainlength generations"
   [numchains chainlength n alpha]
-  (let [p (last (nth (iterate (partial bilm-iteration alpha) (list* 1.0 (repeat n 0))) (dec chainlength)))]
+  (let [p (last (last (run-markov-chain chainlength (bilm-transition-matrix n alpha) (homogeneous-population n))))]
   	(println "Probability that a chain initialised at 0 has gone to completion after" chainlength "generations is" p)
   	(println "This means one chain will be found every" (/ 1 p) "attempts, expect" (/ numchains p) "attempts until this loop exits"))
   (loop [i 0
@@ -157,7 +188,7 @@
         (println "Generating" numchains "transitions took" i "attempts," (double (/ i numchains)) "on average")
         chains)
       ; else generate more
-      (let [chain (take chainlength (iterate (partial population-update n alpha) 0))]
+      (let [chain (take chainlength (iterate #(population-update n alpha %) 0))]
         (if (= (last chain) n)
           (do (println "Found chain" (inc (count chains)) "in trial" (inc i))
           	(recur (inc i) (conj chains chain)))
@@ -185,3 +216,24 @@
 ;(save *1 "chain150.png")
 (plot-trajectory (first (generate-fixation-chains 1 200 50 0.05)))
 ;(save *1 "chain200.png")
+
+;how good is the fit, really?
+
+(defn quality-of-fit
+  "Return the average standard deviation of all chains from the mean transition
+  at every point during the transition (from t=0,x=0, to t=chainlength,x=N)"
+  [N alpha chainlength]
+  (let [conditioned-probs (conditioned-transition N alpha chainlength)
+        mean-trajectory (map #(apply + (map-indexed * %)) conditioned-probs)]
+    (map #(Math/sqrt (apply + (map-indexed (fn [n prob] (* prob (Math/pow (- n %2) 2))) %1))) conditioned-probs mean-trajectory)))
+;    (map #(apply + (map (fn [prob] (Math/pow (- %2 prob) 2)) %1)) conditioned-probs mean-trajectory)))
+
+; matches become increasingly bad around the middle, far from the two conditioned ends
+(quality-of-fit 50 0.05 10)
+(nth (quality-of-fit 50 0.05 10) 5)
+
+; so the standard deviation of actual runs around of figure 2aii is
+(nth (quality-of-fit 50 0.05 50) 25)
+; compare this to the absolute worst possible standard deviation where all of the
+; chains would be as far away from the predicted half/half split as possible
+($= 50 - 50/2)
